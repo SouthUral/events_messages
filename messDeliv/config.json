@@ -1,0 +1,11 @@
+{
+    "rabbit": {
+        "heartbeat": 1800,
+        "username": "enotify",
+        "password": "gAAAAABheog6P5TmMz6mgjhHzE2EYI_925lk7in5xEuiyeXcpX-wcnCnClIhtNNd8VgPJcGhA3ExcKoDkMwfZnkud5-MH99oQg==",
+        "name_queue": "iLogic.Messages"
+    },
+    "log": {
+        "level": "Debug"
+    }
+}
