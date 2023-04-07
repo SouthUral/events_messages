@@ -65,7 +65,7 @@ func (rabbit *Rabbit) Connection() {
 	failOnError(err, "Failed to open a channel")
 	// defer ch.Close()
 
-	if err = rabbit.RabbitConn.Channel.Qos(rabbit.Heartbeat, 0, false); err != nil {
+	if err = rabbit.RabbitConn.Channel.Qos(1, 0, false); err != nil {
 		log.Fatal(err)
 	}
 }
