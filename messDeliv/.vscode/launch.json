@@ -15,8 +15,10 @@
             "env": {
                 "ASD_CIPHER_KEY": "k45IS8Z90sx4w0L6AC2wsG0TntRPaNzsjyU1ve0CaKM=",
                 "ASD_POSTGRES_HOST": "localhost",
-                "ASD_POSTGRES_PORT": "5432",
-                "ASD_POSTGRES_DBNAME": "poly_bgp",
+                "ASD_POSTGRES_PORT": "54321",
+                "ASD_POSTGRES_DBNAME": "go_service",
+                "ASD_POSTGRES_USER": "admin",
+                "ASD_POSTGRES_PASSWORD": "1234567",
                 "ASD_RMQ_HOST": "spbsrvasdproxy2",
                 "ASD_RMQ_PORT": "5672",
                 "ASD_RMQ_VHOST": "asd.asd.local.asd-test-03",
