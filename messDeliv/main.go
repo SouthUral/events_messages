@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	pgx "github.com/jackc/pgx/v5"
+	// pgconn "github.com/jackc/pgx/v5/pgconn"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -61,6 +62,17 @@ func (pg *Postgres) requestDb(msg []byte, offset_msg int64) {
 		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func (pg *Postgres) getOffset() string {
+	var offset_msg string
+	err := pg.Conn.QueryRow(context.Background(), "select offset_msg from device.messages order by offset_msg limit 1;").Scan(&offset_msg)
+	// offset_msg, err := pg.Conn.Exec(context.Background(), "select offset_msg from device.messages order by offset_msg limit 1;")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
+		os.Exit(1)
+	}
+	return offset_msg
 }
 
 func (rabbit *Rabbit) rabbitEnv() {
@@ -132,6 +144,8 @@ func main() {
 	confPg := Postgres{}
 	confPg.pgEnv()
 	confPg.connPg()
+	offset_msg := confPg.getOffset()
+	log.Printf("Received a message %s", offset_msg)
 
 	m, err := configRabbit.Consumer()
 	failOnError(err, "Failed to register a consumer")
