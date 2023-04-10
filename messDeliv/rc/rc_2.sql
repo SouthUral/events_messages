@@ -1,9 +1,10 @@
-CREATE OR REPLACE PROCEDURE device.set_messages(IN p_message jsonb)
+CREATE OR REPLACE PROCEDURE device.set_messages(IN p_message jsonb, IN p_offset bigint)
  LANGUAGE plpgsql
  SECURITY DEFINER
 AS $procedure$
     begin
 	    INSERT INTO device.messages (
+	    	offset_msg,
             created_id,
             device_id,
             object_id,
@@ -16,7 +17,8 @@ AS $procedure$
             event_data
         )
         VALUES (
-            (p_message ->> 'created_id') :: timestamp,
+        	p_offset,
+            convert_to((p_message -> 'data' ->> '_id'), 'utf8'),
             (p_message ->> 'device_id') :: bigint,
             (p_message ->> 'object_id') :: integer,
             (p_message ->> 'mes_id') :: bigint,

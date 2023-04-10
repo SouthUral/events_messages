@@ -55,8 +55,8 @@ func (pg *Postgres) connPg() {
 	}
 }
 
-func (pg *Postgres) requestDb(msg []byte) {
-	_, err := pg.Conn.Exec(context.Background(), "call device.set_messages($1)", msg)
+func (pg *Postgres) requestDb(msg []byte, offset_msg int64) {
+	_, err := pg.Conn.Exec(context.Background(), "call device.set_messages($1, $2)", msg, offset_msg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
 		os.Exit(1)
@@ -137,8 +137,9 @@ func main() {
 	failOnError(err, "Failed to register a consumer")
 
 	for d := range m {
-		log.Printf("Received a message")
-		confPg.requestDb(d.Body)
+		offset := d.Headers["x-stream-offset"].(int64)
+		log.Printf("Received a message %d", offset)
+		confPg.requestDb(d.Body, offset)
 		d.Ack(true)
 	}
 
