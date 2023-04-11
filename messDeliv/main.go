@@ -8,19 +8,19 @@ import (
 	"strconv"
 
 	pgx "github.com/jackc/pgx/v5"
-	// pgconn "github.com/jackc/pgx/v5/pgconn"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type Rabbit struct {
-	Host       string
-	Port       string
-	VHost      string
-	User       string
-	Password   string
-	NameQueue  string
-	Heartbeat  int
-	RabbitConn RabbitConn
+	Host         string
+	Port         string
+	VHost        string
+	User         string
+	Password     string
+	NameQueue    string
+	Heartbeat    int
+	RabbitConn   RabbitConn
+	streamOffset int
 }
 
 type Postgres struct {
@@ -64,13 +64,12 @@ func (pg *Postgres) requestDb(msg []byte, offset_msg int64) {
 	}
 }
 
-func (pg *Postgres) getOffset() string {
-	var offset_msg string
-	err := pg.Conn.QueryRow(context.Background(), "select offset_msg from device.messages order by offset_msg limit 1;").Scan(&offset_msg)
+func (pg *Postgres) getOffset() int {
+	var offset_msg int
+	err := pg.Conn.QueryRow(context.Background(), "SELECT offset_msg FROM device.messages ORDER BY created_at DESC LIMIT 1;").Scan(&offset_msg)
 	// offset_msg, err := pg.Conn.Exec(context.Background(), "select offset_msg from device.messages order by offset_msg limit 1;")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
-		os.Exit(1)
 	}
 	return offset_msg
 }
@@ -120,14 +119,22 @@ func (rabbit *Rabbit) connRabbit() {
 }
 
 func (rabbit *Rabbit) Consumer() (<-chan amqp.Delivery, error) {
+	var args amqp.Table
+
+	if rabbit.streamOffset > 0 {
+		args = amqp.Table{"x-stream-offset": rabbit.streamOffset}
+	} else {
+		args = amqp.Table{"x-stream-offset": "last"}
+	}
+
 	return rabbit.RabbitConn.Channel.Consume(
-		rabbit.NameQueue,                      // queue
-		"test_service",                        // consumer
-		false,                                 // auto-ack
-		false,                                 // exclusive
-		false,                                 // no-local
-		false,                                 // no-wait
-		amqp.Table{"x-stream-offset": "last"}, // args
+		rabbit.NameQueue, // queue
+		"test_service",   // consumer
+		false,            // auto-ack
+		false,            // exclusive
+		false,            // no-local
+		false,            // no-wait
+		args,             // args
 	)
 }
 
@@ -137,15 +144,21 @@ type RabbitConn struct {
 }
 
 func main() {
-	configRabbit := Rabbit{}
-	configRabbit.rabbitEnv()
-	configRabbit.connRabbit()
-
 	confPg := Postgres{}
+	configRabbit := Rabbit{}
+
 	confPg.pgEnv()
 	confPg.connPg()
-	offset_msg := confPg.getOffset()
-	log.Printf("Received a message %s", offset_msg)
+
+	configRabbit.streamOffset = confPg.getOffset()
+	if configRabbit.streamOffset > 0 {
+		configRabbit.streamOffset += 1
+	}
+
+	// log.Printf("Received a message %s", offset_msg)
+
+	configRabbit.rabbitEnv()
+	configRabbit.connRabbit()
 
 	m, err := configRabbit.Consumer()
 	failOnError(err, "Failed to register a consumer")
@@ -154,6 +167,7 @@ func main() {
 		offset := d.Headers["x-stream-offset"].(int64)
 		log.Printf("Received a message %d", offset)
 		confPg.requestDb(d.Body, offset)
+		log.Printf("Данные записаны в БД")
 		d.Ack(true)
 	}
 
