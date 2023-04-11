@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	pgx "github.com/jackc/pgx/v5"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -30,6 +31,7 @@ type Postgres struct {
 	Password     string
 	DataBaseName string
 	Conn         *pgx.Conn
+	isReadyConn  bool
 }
 
 func failOnError(err error, msg string) {
@@ -44,6 +46,7 @@ func (pg *Postgres) pgEnv() {
 	pg.User = getEnvStr("ASD_POSTGRES_USER", "postgres")
 	pg.Password = getEnvStr("ASD_POSTGRES_PASSWORD", "postgres")
 	pg.DataBaseName = getEnvStr("ASD_POSTGRES_DBNAME", "postgres")
+	pg.isReadyConn = false
 }
 
 func (pg *Postgres) connPg() {
@@ -51,27 +54,44 @@ func (pg *Postgres) connPg() {
 	var err error
 	pg.Conn, err = pgx.Connect(context.Background(), dbURL)
 	if err != nil {
-		log.Fatal(err)
-		os.Exit(1)
+		log.Printf("QueryRow failed: %v\n", err)
+	} else {
+		pg.isReadyConn = true
+		log.Printf("Connect DB is ready")
 	}
 }
 
-func (pg *Postgres) requestDb(msg []byte, offset_msg int64) {
+func (pg *Postgres) connPgloop() {
+	for {
+		if !pg.isReadyConn {
+			pg.connPg()
+		} else {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+}
+
+func (pg *Postgres) requestDb(msg []byte, offset_msg int64) error {
 	_, err := pg.Conn.Exec(context.Background(), "call device.set_messages($1, $2)", msg, offset_msg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
 
 func (pg *Postgres) getOffset() int {
 	var offset_msg int
-	err := pg.Conn.QueryRow(context.Background(), "SELECT offset_msg FROM device.messages ORDER BY created_at DESC LIMIT 1;").Scan(&offset_msg)
-	// offset_msg, err := pg.Conn.Exec(context.Background(), "select offset_msg from device.messages order by offset_msg limit 1;")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
+	if pg.isReadyConn {
+		err := pg.Conn.QueryRow(context.Background(), "SELECT offset_msg FROM device.messages ORDER BY created_at DESC LIMIT 1;").Scan(&offset_msg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
+		}
+		return offset_msg
 	}
-	return offset_msg
+	return 0
 }
 
 func (rabbit *Rabbit) rabbitEnv() {
@@ -143,19 +163,37 @@ type RabbitConn struct {
 	Channel   *amqp.Channel
 }
 
-func main() {
+func pgMainConnect() Postgres {
 	confPg := Postgres{}
+	confPg.pgEnv()
+	// go confPg.connPgloop()
+	time.Sleep(50 * time.Millisecond)
+	return confPg
+}
+
+// func (pg *Postgres) waitPg() {
+// 	for {
+// 		if pg.isReadyConn {
+// 			return
+// 		}
+// 		time.Sleep(100 * time.Millisecond)
+// 	}
+// }
+
+func main() {
+	var forever chan struct{}
+
+	confPg := pgMainConnect()
 	configRabbit := Rabbit{}
 
-	confPg.pgEnv()
-	confPg.connPg()
+	// тут надо ждать пока подключение к постгрес появиться чтобы узнать оффсет
+	// confPg.waitPg()
+	confPg.connPgloop()
 
 	configRabbit.streamOffset = confPg.getOffset()
 	if configRabbit.streamOffset > 0 {
 		configRabbit.streamOffset += 1
 	}
-
-	// log.Printf("Received a message %s", offset_msg)
 
 	configRabbit.rabbitEnv()
 	configRabbit.connRabbit()
@@ -166,10 +204,19 @@ func main() {
 	for d := range m {
 		offset := d.Headers["x-stream-offset"].(int64)
 		log.Printf("Received a message %d", offset)
-		confPg.requestDb(d.Body, offset)
-		log.Printf("Данные записаны в БД")
-		d.Ack(true)
+		err := confPg.requestDb(d.Body, offset)
+		for {
+			if err == nil {
+				log.Printf("Данные записаны в БД")
+				d.Ack(true)
+				break
+			} else {
+				// confPg.connPgloop()
+			}
+		}
+
 	}
 
 	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
+	<-forever
 }
