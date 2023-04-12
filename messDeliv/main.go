@@ -22,6 +22,7 @@ type Rabbit struct {
 	Heartbeat    int
 	RabbitConn   RabbitConn
 	streamOffset int
+	isReadyConn  bool
 }
 
 type Postgres struct {
@@ -32,12 +33,6 @@ type Postgres struct {
 	DataBaseName string
 	Conn         *pgx.Conn
 	isReadyConn  bool
-}
-
-func failOnError(err error, msg string) {
-	if err != nil {
-		log.Panicf("%s: %s", msg, err)
-	}
 }
 
 func (pg *Postgres) pgEnv() {
@@ -122,20 +117,39 @@ func getEnvInt(key string, defaultVal int) int {
 	return defaultVal
 }
 
+func (rb *Rabbit) connRabbitloop() {
+	for {
+		if !rb.isReadyConn {
+			rb.connRabbit()
+		} else {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+}
+
 func (rabbit *Rabbit) connRabbit() {
 	loginParameters := fmt.Sprintf("amqp://%s:%s@%s:%s/%s", rabbit.User, rabbit.Password, rabbit.Host, rabbit.Port, rabbit.VHost)
 	var err error
 	rabbit.RabbitConn.Connector, err = amqp.Dial(loginParameters)
-	failOnError(err, "Failed to connect to RabbitMQ")
-	// defer conn.Close()
+	if err != nil {
+		log.Printf("Connect Rabbit failed: %v\n", err)
+		return
+	}
 
 	rabbit.RabbitConn.Channel, err = rabbit.RabbitConn.Connector.Channel()
-	failOnError(err, "Failed to open a channel")
-	// defer ch.Close()
+	if err != nil {
+		log.Printf("Channel Rabbit failed: %v\n", err)
+		return
+	}
 
 	if err = rabbit.RabbitConn.Channel.Qos(1, 0, false); err != nil {
-		log.Fatal(err)
+		log.Printf("Qos Rabbit failed: %v\n", err)
+		return
 	}
+
+	rabbit.isReadyConn = true
 }
 
 func (rabbit *Rabbit) Consumer() (<-chan amqp.Delivery, error) {
@@ -182,17 +196,22 @@ func rabbitMainConnect(offset int) Rabbit {
 	}
 
 	configRabbit.rabbitEnv()
-	configRabbit.connRabbit()
+	configRabbit.connRabbitloop()
 
 	return configRabbit
 }
 
-func worker() error {
+func worker() {
 	confPg := pgMainConnect()
 	configRabbit := rabbitMainConnect(confPg.getOffset())
 
 	m, err := configRabbit.Consumer()
-	failOnError(err, "Failed to register a consumer")
+	if err != nil {
+		log.Printf("Failed to register a consumer: %v\n", err)
+		configRabbit.isReadyConn = false
+		return
+	}
+	// failOnError(err, "Failed to register a consumer")
 
 	for d := range m {
 		offset := d.Headers["x-stream-offset"].(int64)
@@ -202,22 +221,17 @@ func worker() error {
 			log.Printf("Данные записаны в БД")
 			d.Ack(true)
 		} else {
-			// d.Nack(true, false)
-			return err
+			return
 		}
 
 	}
-	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
-	return nil
+	return
 }
 
 func main() {
-	var err error
 	for {
-		err = worker()
-		if err != nil {
-			time.Sleep(1 * time.Millisecond)
-			continue
-		}
+		worker()
+		time.Sleep(50 * time.Millisecond)
 	}
+
 }
