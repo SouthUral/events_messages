@@ -1,21 +1,21 @@
 import json
-import psycopg2
-from psycopg2.extras import DictCursor
+# import psycopg2
+# from psycopg2.extras import DictCursor
 
 def message_reader(json_f):
     for line in json_f:
         yield line
 
-dsl = {
-'dbname': 'db01',
-'user': 'admin',
-'password': '1234567',
-'host': 'localhost',
-'port': '54320'
-}
+# dsl = {
+# 'dbname': 'db01',
+# 'user': 'admin',
+# 'password': '1234567',
+# 'host': 'localhost',
+# 'port': '54320'
+# }
 
 def get_message():
-    with open('messages.json', 'r') as file, psycopg2.connect(**dsl, cursor_factory=DictCursor) as pg_conn:
+    with open('messages.json', 'r') as file:
         # cursor = pg_conn.cursor()
         file_content = file.read()
         # templates = json.dumps(json.loads(file_content))

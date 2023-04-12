@@ -8,7 +8,7 @@ message = get_message()
 
 
 def url():
-    port = "5672"
+    port = "5673"
     user = "guest"
     password = "guest"
     v_host = "new"
@@ -28,15 +28,13 @@ async def connect():
 async def send_message(protocol: aioamqp.AmqpProtocol):
     channel = await protocol.channel()
     while True:
-        # message = get_message()
-        # message = time.ctime(time.time())
         await channel.publish(
             payload=message.encode(),
             exchange_name='amq.topic',
             routing_key='test'
         )
-        logger.success(f"Отправлено сообщение: {message}")
-        time.sleep(5)
+        logger.success("Отправлено сообщение")
+        time.sleep(3)
 
 
 async def send_another(protocol):
@@ -62,7 +60,6 @@ async def close(transport, protocol):
 async def main():
     transport, protocol = await connect()
     await send_message(protocol)
-    # await close(transport, protocol)
 
 
 def worker_loop():
