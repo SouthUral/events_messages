@@ -166,37 +166,30 @@ type RabbitConn struct {
 func pgMainConnect() Postgres {
 	confPg := Postgres{}
 	confPg.pgEnv()
-	// go confPg.connPgloop()
+
+	confPg.connPgloop()
+
 	time.Sleep(50 * time.Millisecond)
 	return confPg
 }
 
-// func (pg *Postgres) waitPg() {
-// 	for {
-// 		if pg.isReadyConn {
-// 			return
-// 		}
-// 		time.Sleep(100 * time.Millisecond)
-// 	}
-// }
-
-func main() {
-	var forever chan struct{}
-
-	confPg := pgMainConnect()
+func rabbitMainConnect(offset int) Rabbit {
 	configRabbit := Rabbit{}
 
-	// тут надо ждать пока подключение к постгрес появиться чтобы узнать оффсет
-	// confPg.waitPg()
-	confPg.connPgloop()
-
-	configRabbit.streamOffset = confPg.getOffset()
+	configRabbit.streamOffset = offset
 	if configRabbit.streamOffset > 0 {
 		configRabbit.streamOffset += 1
 	}
 
 	configRabbit.rabbitEnv()
 	configRabbit.connRabbit()
+
+	return configRabbit
+}
+
+func worker() error {
+	confPg := pgMainConnect()
+	configRabbit := rabbitMainConnect(confPg.getOffset())
 
 	m, err := configRabbit.Consumer()
 	failOnError(err, "Failed to register a consumer")
@@ -205,18 +198,26 @@ func main() {
 		offset := d.Headers["x-stream-offset"].(int64)
 		log.Printf("Received a message %d", offset)
 		err := confPg.requestDb(d.Body, offset)
-		for {
-			if err == nil {
-				log.Printf("Данные записаны в БД")
-				d.Ack(true)
-				break
-			} else {
-				// confPg.connPgloop()
-			}
+		if err == nil {
+			log.Printf("Данные записаны в БД")
+			d.Ack(true)
+		} else {
+			// d.Nack(true, false)
+			return err
 		}
 
 	}
-
 	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
-	<-forever
+	return nil
+}
+
+func main() {
+	var err error
+	for {
+		err = worker()
+		if err != nil {
+			time.Sleep(1 * time.Millisecond)
+			continue
+		}
+	}
 }
